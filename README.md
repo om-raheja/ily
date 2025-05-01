@@ -1,4 +1,7 @@
 # chat
+
+Om: I love you, my unnamed gf (the internet will never know u) <3
+
 Simple plug & play real-time JavaScript chat implemented using Socket.io.
 
 Where simplicity meets usability:
