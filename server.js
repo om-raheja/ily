@@ -34,7 +34,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   username VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
+  created decimal default extract(epoch from now()),
   view_history BOOLEAN DEFAULT TRUE NOT NULL
     );`);
 
@@ -42,7 +42,7 @@ pool.query(`CREATE TABLE IF NOT EXISTS messages (
   id SERIAL PRIMARY KEY,
   username VARCHAR(255) NOT NULL,
   message TEXT NOT NULL,
-  time TIMESTAMP DEFAULT NOW()
+  sent_at DECIMAL DEFAULT EXTRACT(EPOCH FROM NOW())
     );`);
 
 // batch size when requesting old questions
@@ -118,17 +118,16 @@ io.sockets.on("connection", function(socket){
 
           if (user.view_history) {
             const result = await pool.query(
-              'SELECT username, message, time, id FROM messages ORDER BY time DESC LIMIT $1',
+              'SELECT username, message, sent_at, id FROM messages ORDER BY id DESC LIMIT $1',
               [batch_size]
             );
 
             const messageCache = result.rows.map(row => {
               try {
-                console.log(row.time.toLocaleString({ timeZone: 'EST' }));
                 return {
                   f: row.username,
                   m: JSON.parse(row.message),
-                  time: row.time.getTime(),
+                  time: row.sent_at * 1000,
                   id: row.id
                 };
               } catch (err) {
@@ -153,15 +152,17 @@ io.sockets.on("connection", function(socket){
 		}
 
         const result = await pool.query(
-            'INSERT INTO messages (username, message) VALUES ($1, $2) RETURNING id, time',
+            'INSERT INTO messages (username, message) VALUES ($1, $2) RETURNING id, sent_at',
             [nick, data.m]
         );
+
+        console.log(result.rows[0].sent_at);
 
 		const msg = {
 			"f": nick,
 			"m": data.m,
 			"id": result.rows[0].id,
-            "time": result.rows[0].time.getTime()
+            "time": result.rows[0].sent_at * 1000
         };
 
 		// Send everyone message
@@ -188,14 +189,14 @@ io.sockets.on("connection", function(socket){
                 query = `
                     SELECT * FROM messages 
                     WHERE id < $1 
-                    ORDER BY time DESC 
+                    ORDER BY id DESC 
                     LIMIT $2
                 `;
                 params = [data.last, batch_size];
             } else {
                 query = `
                     SELECT * FROM messages 
-                    ORDER BY time DESC 
+                    ORDER BY id DESC 
                     LIMIT $1
                 `;
                 params = [batch_size];
@@ -209,7 +210,7 @@ io.sockets.on("connection", function(socket){
                     return {
                         f: row.username,
                         m: JSON.parse(row.message),
-                        time: row.time.getTime(),
+                        time: row.sent_at * 1000,
                         id: row.id
                     };
                 } catch (err) {
@@ -217,7 +218,7 @@ io.sockets.on("connection", function(socket){
                     return {
                         f: row.username,
                         m: { text: row.message }, // Fallback to raw text
-                        time: row.time.getTime(),
+                        time: row.sent_at * 1000,
                         id: row.id
                     };
                 }

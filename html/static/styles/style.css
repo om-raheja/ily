@@ -397,3 +397,8 @@ a {
     margin-right: 8px;
     padding-left: 0px !important;
 }
+
+#users li.inactive {
+    color: #888;
+    opacity: 0.7;
+}

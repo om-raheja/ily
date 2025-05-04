@@ -19,11 +19,11 @@ pool.query('SELECT NOW()')
 
 async function initUsers() {
     await pool.query(`CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  username VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  created_at TIMESTAMP DEFAULT NOW(),
-  view_history BOOLEAN DEFAULT TRUE NOT NULL
+      id SERIAL PRIMARY KEY,
+      username VARCHAR(255) UNIQUE NOT NULL,
+      password_hash VARCHAR(255) NOT NULL,
+      created decimal default extract(epoch from now()),
+      view_history BOOLEAN DEFAULT TRUE NOT NULL
     );`);
 }
 

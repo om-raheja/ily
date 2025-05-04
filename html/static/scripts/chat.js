@@ -21,8 +21,10 @@ var Chat = {
 	is_focused: false,
 	is_online: false,
 	is_typing: false,
+
 	last_sent_nick: null,
     last_msg_time: null,
+
 
 	original_title: document.title,
 	new_title: "New messages...",
@@ -257,8 +259,6 @@ var Chat = {
     },
 
     new_msg: function(r, notif=true){
-        console.log(r.time);
-
         const fromSelf = my_nick == r.f;
 
         var li = document.createElement('div');
@@ -660,6 +660,8 @@ var Chat = {
 				return;
 			}
 
+            Chat.socket.emit('user-active');
+
 			// Clear ttout, if there was
 			typeof Chat.notif.ttout === "undefined" || clearInterval(Chat.notif.ttout);
 			Chat.notif.ttout = undefined;
@@ -677,7 +679,7 @@ var Chat = {
 		// On blur
 		window.addEventListener('blur', function(){
 			Chat.is_focused = false;
-            // TODO: grey out in active users
+            Chat.socket.emit('user-inactive');
 		});
         
         // On login 
