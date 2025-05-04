@@ -1,6 +1,8 @@
 require('dotenv').config()
 const express = require('express')
 const app = express()
+const bcrypt = require('bcrypt');
+const { Pool } = require('pg');
 
 const path = require('path')
 const html = path.join(__dirname, '/html');
@@ -13,22 +15,50 @@ const maxHttpBufferSizeInMb = parseInt(process.env.MAX_HTTP_BUFFER_SIZE_MB || '1
 const io = require("socket.io")(http, {
   maxHttpBufferSize: maxHttpBufferSizeInMb * 1024 * 1024,
 });
-let messageCache = [];
-// default cache size to zero. override in environment
-let cache_size = process.env.CACHE_SIZE ?? 0
+
+
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  ssl: process.env.DB_SSL === 'require' ? { rejectUnauthorized: false } : false
+});
+
+pool.query('SELECT NOW()')
+  .then(() => console.log('Database connected successfully'))
+  .catch(err => console.error('Database connection error:', err));
+
+pool.query(`CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW(),
+  view_history BOOLEAN DEFAULT TRUE NOT NULL
+    );`);
+
+pool.query(`CREATE TABLE IF NOT EXISTS messages (
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(255) NOT NULL,
+  message TEXT NOT NULL,
+  time TIMESTAMP DEFAULT NOW()
+    );`);
+
+// batch size when requesting old questions
+let batch_size = process.env.BATCH_SIZE ?? 50;
 
 http.listen(port, function(){
 	console.log("Starting server on port %s", port);
 });
 
-const users = [];
-let msg_id = 1;
+const users = new Set();
 io.sockets.on("connection", function(socket){
 	console.log("New connection!");
 
 	var nick = null;
 
-	socket.on("login", function(data){
+	socket.on("login", async function(data){
 		// Security checks
 		data.nick = data.nick.trim();
 
@@ -39,60 +69,168 @@ io.sockets.on("connection", function(socket){
 			return;
 		}
 
-		// If is already in
-		if(users.indexOf(data.nick) != -1){
-			socket.emit("force-login", "This nick is already in chat.");
-			nick = null;
-			return;
-		}
+        try {
+          const username = data.nick?.trim() || '';
+          const password = data.password?.trim() || '';
 
-		// Save nick
-		nick = data.nick;
-		users.push(data.nick);
+          if (!username || !password) {
+            return socket.emit("force-login", "Both username and password are required.");
+          }
 
-		console.log("User %s joined.", nick.replace(/(<([^>]+)>)/ig, ""));
-		socket.join("main");
+          // Database query
+          const userRes = await pool.query(
+            'SELECT username, password_hash, view_history FROM users WHERE username = $1',
+            [username]
+          );
 
-		// Tell everyone, that user joined
-		io.to("main").emit("ue", {
-			"nick": nick
-		});
+          if (userRes.rows.length === 0) {
+            return socket.emit("force-login", "Invalid credentials.");
+          }
 
-		// Tell this user who is already in
-		socket.emit("start", {
-			"users": users
-		});
+          const user = userRes.rows[0];
+          const validPassword = await bcrypt.compare(password, user.password_hash);
 
-		// Send the message cache to the new user
-		console.log(`going to send cache to ${nick}`)
-		socket.emit("previous-msg", {
-			"msgs": messageCache
-		});
+          if (!validPassword) {
+            return socket.emit("force-login", "Invalid credentials.");
+          }
+
+          nick = username;
+
+          // Successful login logic...
+          if (!users.has(username)) {
+            users.add(username);
+
+            // Tell everyone, that user joined
+            io.to("main").emit("ue", {
+                "nick": nick
+            });
+          }
+
+          console.log(`User ${username} authenticated`);
+
+          console.log("User %s joined.", nick.replace(/(<([^>]+)>)/ig, ""));
+          socket.join("main");
+
+          // Tell this user who is already in
+          socket.emit("start", {
+              "users": Array.from(users)
+          });
+
+          if (user.view_history) {
+            const result = await pool.query(
+              'SELECT username, message, time, id FROM messages ORDER BY time DESC LIMIT $1',
+              [batch_size]
+            );
+
+            const messageCache = result.rows.map(row => {
+              try {
+                return {
+                  f: row.username,
+                  m: JSON.parse(row.message),
+                  time: row.time.toISOString(),
+                  id: row.id
+                };
+              } catch (err) {
+                console.error('Failed to parse message:', row.message);
+              }
+            });
+
+            socket.emit("previous-msg", { msgs: messageCache });
+          }
+
+        } catch (err) {
+          console.error('Login error:', err);
+          socket.emit("force-login", "Server error during authentication.");
+        }
 	});
 
-	socket.on("send-msg", function(data){
+	socket.on("send-msg", async function(data){
 		// If is logged in
 		if(nick == null){
 			socket.emit("force-login", "You need to be logged in to send message.");
 			return;
 		}
 
+        const result = await pool.query(
+            'INSERT INTO messages (username, message) VALUES ($1, $2) RETURNING id',
+            [nick, data.m]
+        );
+
 		const msg = {
 			"f": nick,
 			"m": data.m,
-			"id": "msg_" + (msg_id++)
-		}
-
-		messageCache.push(msg);
-		if(messageCache.length > cache_size){
-			messageCache.shift(); // Remove the oldest message
-		}
+			"id": result.rows[0].id
+        };
 
 		// Send everyone message
 		io.to("main").emit("new-msg", msg);
 
 		console.log("User %s sent message.", nick.replace(/(<([^>]+)>)/ig, ""));
 	});
+
+    // Add this inside the io.sockets.on("connection") handler
+    socket.on('load-more-messages', async (data) => {
+        try {
+            // Validate user is logged in
+            if (!nick) {
+                return socket.emit("force-login", "You need to be logged in.");
+            }
+
+            // Build the query based on whether we have a last message ID
+            let query;
+            let params;
+            
+            console.log("Fetching questions before %s for user %s", data.last, nick);
+            
+            if (data.last) {
+                query = `
+                    SELECT * FROM messages 
+                    WHERE id < $1 
+                    ORDER BY time DESC 
+                    LIMIT $2
+                `;
+                params = [data.last, batch_size];
+            } else {
+                query = `
+                    SELECT * FROM messages 
+                    ORDER BY time DESC 
+                    LIMIT $1
+                `;
+                params = [batch_size];
+            }
+
+            const result = await pool.query(query, params);
+
+            // Format messages with proper IDs and parsed JSON
+            const olderMessages = result.rows.map(row => {
+                try {
+                    return {
+                        f: row.username,
+                        m: JSON.parse(row.message),
+                        time: row.time.toISOString(),
+                        id: row.id
+                    };
+                } catch (err) {
+                    console.error('Error parsing message:', err);
+                    return {
+                        f: row.username,
+                        m: { text: row.message }, // Fallback to raw text
+                        time: row.time.toISOString(),
+                        id: row.id
+                    };
+                }
+            });
+
+            socket.emit('older-msgs', { 
+                msgs: olderMessages,
+                hasMore: olderMessages.length >= batch_size
+            });
+
+        } catch (err) {
+            console.error('Error loading older messages:', err);
+            socket.emit("error", "Failed to load older messages");
+        }
+    });
 
 	socket.on("typing", function(typing){
 		// Only logged in users
@@ -111,7 +249,7 @@ io.sockets.on("connection", function(socket){
 
 		if(nick != null){
 			// Remove user from users
-			users.splice(users.indexOf(nick), 1);
+            users.delete(nick);
 
 			// Tell everyone user left
 			io.to("main").emit("ul", {

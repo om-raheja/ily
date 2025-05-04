@@ -23,8 +23,10 @@
   },
   "homepage": "https://github.com/m1k1o/chat#readme",
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "pg": "^8.15.6",
     "socket.io": "^4.8.0"
   }
 }

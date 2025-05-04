@@ -13,7 +13,16 @@
 </head>
 
 <body>
-  <div class="chat">
+  <div id="login-container">
+    <div class="chat-form login-form" id="login-form">
+      <h2>Login</h2>
+      <input class="form-control login-item" id="username" placeholder="Username" required>
+      <input class='form-control login-item' id="password" type="password" placeholder="Password" class="form-control" required>
+      <button class='form-control login-item' type="submit" id="login">Sign In</button>
+    </div>
+  </div>
+
+  <div class="chat" style="display:none;">
     <div id="chat-box" class="chat-box">
       <div id="offline"><span class="big">Server is offline.</span><br />Sorry for that.</div>
       <ul id="msgs" class="msgs"></ul>

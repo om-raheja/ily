@@ -301,7 +301,7 @@ a {
 	box-shadow: none;
 }
 
-#send{
+#send {
 	background: none;
 	color: white;
 	text-transform: uppercase;
@@ -309,6 +309,24 @@ a {
 	margin: 0 10px 0 0;
 	border: 1px solid white;
 	border-radius: 0;
+}
+
+#login {
+    background: none;
+    color: white;
+    text-transform: uppercase;
+    padding: 5px;
+    margin: 10px 0;
+    border: 1px solid white;
+    border-radius: 0;
+    transition: all 0.3s ease; /* Smooth transition for all properties */
+    cursor: pointer;
+}
+
+#login:hover,
+#login:active { /* :active handles mobile taps */
+    background: white !important;
+    color: black !important;
 }
 
 #emic_btn {
@@ -337,4 +355,22 @@ a {
 
 #users li:last-child:after {
 	content: "";
+}
+
+.chat-form .form-control.login-item {
+  margin: 10px 0;
+}
+
+.loading-older {
+    text-align: center;
+    padding: 10px;
+    color: #666;
+    font-style: italic;
+}
+
+.message-time {
+    font-size: 0.75em;
+    color: #666;
+    margin: 0 0.5em;
+    white-space: nowrap;
 }

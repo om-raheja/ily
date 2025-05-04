@@ -9,6 +9,15 @@ var Chat = {
 	textarea: document.getElementById("form_input"),
 	send_btn: document.getElementById("send"),
 
+    // login infra
+    login_btn: document.getElementById("login"),
+    username_input: document.getElementById("username"),
+    password_input: document.getElementById("password"),
+
+    // just store the logins in an easy to access place
+    my_nick: localStorage.nick || sessionStorage.nick || null,
+    my_password: localStorage.password || sessionStorage.password || null,
+
 	is_focused: false,
 	is_online: false,
 	is_typing: false,
@@ -16,6 +25,11 @@ var Chat = {
 
 	original_title: document.title,
 	new_title: "New messages...",
+
+    // older messages handling
+    is_loading: false,
+    earliest_message_id: null,
+    at_top: false,
 
 	scroll: function(){
 		setTimeout(function(){
@@ -75,6 +89,11 @@ var Chat = {
 
 		// Create new notification
 		create: function(from, message){
+            // If it's me then no notifs
+            if(from === my_nick) {
+                return;
+            }
+
 			// If is focused, no notification
 			if(Chat.is_focused || !Chat.notif.enabled){
 				return;
@@ -218,12 +237,28 @@ var Chat = {
 		}
 	},
 
-	new_msg: function(r){
-		console.log("New message.");
-		const fromSelf = sessionStorage.nick == r.f;
+    login: function() {
+        const username = Chat.username_input.value.trim();
+        const password = Chat.password_input.value.trim();
+        
+        // Clear previous errors
+        const errorEl = this.querySelector('.error');
+        if(errorEl) errorEl.remove();
 
-		// Notify user
-		Chat.notif.create(r.f, r.m);
+        Chat.socket.emit("login", {
+            nick: username,
+            password: password
+        });
+        
+        // Store username in sessionStorage
+        my_nick = sessionStorage.nick = localStorage.nick = username; 
+        my_password = sessionStorage.password = localStorage.password = password;
+    },
+
+	new_msg: function(r, notif=true){
+		console.log("New message.");
+
+		const fromSelf = my_nick == r.f;
 
 		var li = document.createElement('div');
 		li.id = r.id;
@@ -247,6 +282,14 @@ var Chat = {
 		body.className = 'body' + (fromSelf ? ' out' : ' in');
 		Chat.append_msg(body, r.m);
 
+        /*
+        // Add timestamp
+        var time = document.createElement('span');
+        time.className = 'message-time';
+        time.textContent = this.format_time(r.time);
+        msg.appendChild(time); // Add to message container
+        */
+
 		msg.appendChild(body);
 
 		li.appendChild(msg);
@@ -260,9 +303,60 @@ var Chat = {
 		// Prepend because flex-direction: column-reverse
 		Chat.msgs_list.prepend(c);
 
+		// Notify user
+        if(notif) Chat.notif.create(r.f, r.m);
+
 		// Scroll to new message
 		Chat.scroll();
 	},
+
+	make_historical_msg_element: function(r, previousNick){
+		// Append because flex-direction: column-reverse
+        const fromSelf = my_nick == r.f;
+        const showHeader = previousNick !== r.f;
+
+        var li = document.createElement('div');
+        li.id = r.id;
+
+        var prefix = document.createElement('span');
+        prefix.className = 'prefix';
+        prefix.innerText = r.f;
+        prefix.style.display = showHeader ? "block" : "none";
+        li.appendChild(prefix);
+
+        var msg = document.createElement('div');
+        msg.className = 'message';
+
+        var body = document.createElement('span');
+        body.className = 'body' + (fromSelf ? ' out' : ' in');
+        Chat.append_msg(body, r.m);
+
+        /*
+        var time = document.createElement('span');
+        time.className = 'message-time';
+        time.textContent = Chat.format_time(r.time);
+        msg.appendChild(time); // Add to message container
+        */
+
+        msg.appendChild(body);
+        li.appendChild(msg);
+
+        var c = document.createElement('li');
+        c.appendChild(li);
+        if (fromSelf) {
+            c.classList.add('message-from-self');
+        }
+
+        return { element: c, currentNick: r.f };
+	},
+
+    format_time: function(isoString) {
+        const date = new Date(isoString);
+        return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+        })}`;
+    },
 
 	append_msg: function(el, msg){
 		if(!msg) return;
@@ -337,25 +431,21 @@ var Chat = {
 	},
 
 	force_login: function(fail){
-		if(typeof fail !== "undefined"){
-			alert(fail);
-		}
-
-		var nick = prompt("Your nick:", sessionStorage.nick || localStorage.nick || "").trim();
-		if(typeof nick !== "undefined" && nick){
-			sessionStorage.nick = localStorage.nick = nick;
-			Chat.socket.emit("login", {
-				nick: nick
-			});
-		}
-	},
-
-	reload: function(){
-		if(typeof sessionStorage.nick !== "undefined" && sessionStorage.nick){
-			Chat.socket.emit("login", {
-				nick: sessionStorage.nick
-			});
-		}
+      //e.preventDefault();
+      // Show login form if hidden
+      document.getElementById('login-container').style.display = 'flex';
+      document.querySelector('.chat').style.display = 'none';
+      
+      // Display error in form
+      const form = document.getElementById('login-form');
+      const errorEl = form.querySelector('.error') || document.createElement('div');
+      errorEl.className = 'error';
+      errorEl.style.color = '#ff4444';
+      errorEl.textContent = fail;
+      
+      if(!form.querySelector('.error')) {
+          form.insertBefore(errorEl, form.querySelector('button'));
+      }
 	},
 
 	user: {
@@ -363,8 +453,12 @@ var Chat = {
 
 		// Load all users
 		start: function(r){
+            document.getElementById('login-container').style.display = 'none';
+            document.querySelector('.chat').style.display = '';
+
 			Chat.users.innerText = '';
 
+            console.log(r);
 			for(var user in r.users){
 				var nick = document.createElement('li');
 				nick.innerText = r.users[user];
@@ -374,10 +468,18 @@ var Chat = {
 		},
 
 		previous_messages: function(data){
-			console.log(`msgs: ${data}`)
+            console.log("msgs:");
+			console.log(data);
 
-			data.msgs.forEach(element => {
-				Chat.new_msg(element)
+            if (data.msgs.length === 0) {
+                return;    
+            }
+            Chat.earliest_message_id = data.msgs[data.msgs.length - 1].id;
+            console.log("earliest_message_id: " + Chat.earliest_message_id);
+
+            // backend sends in descending order
+			data.msgs.reverse().forEach(element => {
+				Chat.new_msg(element, false);
 			});
 		},
 
@@ -433,6 +535,62 @@ var Chat = {
 		Chat.users.innerText = '';
 	},
 
+    // tell the server to load older messages
+    load_older_messages: function() {
+      // Show loading indicator
+      if (!Chat.is_loading) {
+        const loader = document.createElement('div');
+        loader.className = 'loading-older';
+        loader.textContent = 'Loading older messages...';
+        Chat.msgs_list.appendChild(loader);
+        Chat.is_loading = true;
+
+        // Request older messages from server
+        Chat.socket.emit('load-more-messages', {
+          last: Chat.earliest_message_id,
+        });
+      } 
+    },
+
+    // receive older messages
+    older_messages: function(data) {
+        console.log("received %s older messages to render", data.msgs.length);
+        const loader = document.querySelector('.loading-older');
+        
+        Chat.is_loading = false;
+
+        if(data.msgs.length > 0) {
+            if(loader) loader.remove();
+            const prevScrollHeight = Chat.chat_box.scrollHeight;
+            const prevScrollTop = Chat.chat_box.scrollTop;
+
+            // Track previous nick within this batch
+            let previousNick = null;
+            const fragment = document.createDocumentFragment();
+            
+            // Process messages in reverse order (oldest first)
+            data.msgs.reverse().forEach(msg => {
+                const { element, currentNick } = Chat.make_historical_msg_element(msg, previousNick);
+                fragment.prepend(element);
+                previousNick = currentNick;
+            });
+
+            // Insert at top
+            Chat.msgs_list.append(fragment);
+
+            // Update earliest known message ID
+            Chat.earliest_message_id = data.msgs[0].id;
+
+            // Adjust scroll position
+            const newScrollHeight = Chat.chat_box.scrollHeight;
+            Chat.chat_box.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+        } else if (data.msgs.length === 0) {
+            console.log("no older messages to render");
+            loader.textContent = 'No older messages to render';
+            Chat.at_top = true;
+        }
+    },
+
 	init: function(socket){
 		// Set green favicon
 		Chat.notif.favicon('red');
@@ -442,6 +600,20 @@ var Chat = {
 
 		// Create beep object
 		Chat.notif.beep = Chat.notif.beep_create();
+
+        // Add scroll event listener to chat box
+        Chat.chat_box.addEventListener('scroll', function() {
+          // Detect when scrolled near top (100px threshold)
+          if(this.scrollTop < 100 && !Chat.isLoading) {
+            if (!Chat.at_top) {
+              Chat.load_older_messages();
+            }
+          }
+        });
+
+        // Add loading state management
+        Chat.is_loading = false;
+        Chat.earliest_message_id = null;
 
 		// On focus
 		window.addEventListener('focus', function(){
@@ -463,12 +635,17 @@ var Chat = {
 
 			// Set back page title
 			document.title = Chat.original_title;
+            // TODO: ungrey out in active users
 		});
 
 		// On blur
 		window.addEventListener('blur', function(){
 			Chat.is_focused = false;
+            // TODO: grey out in active users
 		});
+        
+        // On login 
+        Chat.login_btn.onclick = Chat.login;
 
 		// On click send message
 		Chat.send_btn.onclick = Chat.send_event;
@@ -501,6 +678,8 @@ var Chat = {
 		Chat.socket.on("start", Chat.user.start);
 		Chat.socket.on("ue", Chat.user.enter);
 		Chat.socket.on("ul", Chat.user.leave);
+
+        Chat.socket.on("older-msgs", Chat.older_messages);
 
 		var dropZone = document.getElementsByTagName("body")[0];
 
