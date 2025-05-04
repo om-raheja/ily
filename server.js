@@ -124,10 +124,11 @@ io.sockets.on("connection", function(socket){
 
             const messageCache = result.rows.map(row => {
               try {
+                console.log(row.time.toLocaleString({ timeZone: 'EST' }));
                 return {
                   f: row.username,
                   m: JSON.parse(row.message),
-                  time: row.time.toISOString(),
+                  time: row.time.getTime(),
                   id: row.id
                 };
               } catch (err) {
@@ -152,14 +153,15 @@ io.sockets.on("connection", function(socket){
 		}
 
         const result = await pool.query(
-            'INSERT INTO messages (username, message) VALUES ($1, $2) RETURNING id',
+            'INSERT INTO messages (username, message) VALUES ($1, $2) RETURNING id, time',
             [nick, data.m]
         );
 
 		const msg = {
 			"f": nick,
 			"m": data.m,
-			"id": result.rows[0].id
+			"id": result.rows[0].id,
+            "time": result.rows[0].time.getTime()
         };
 
 		// Send everyone message
@@ -207,7 +209,7 @@ io.sockets.on("connection", function(socket){
                     return {
                         f: row.username,
                         m: JSON.parse(row.message),
-                        time: row.time.toISOString(),
+                        time: row.time.getTime(),
                         id: row.id
                     };
                 } catch (err) {
@@ -215,7 +217,7 @@ io.sockets.on("connection", function(socket){
                     return {
                         f: row.username,
                         m: { text: row.message }, // Fallback to raw text
-                        time: row.time.toISOString(),
+                        time: row.time.getTime(),
                         id: row.id
                     };
                 }

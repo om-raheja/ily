@@ -368,9 +368,32 @@ a {
     font-style: italic;
 }
 
+.message-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.prefix {
+    font-weight: bold;
+}
+
 .message-time {
-    font-size: 0.75em;
+    font-size: 0.8em;
     color: #666;
-    margin: 0 0.5em;
-    white-space: nowrap;
+}
+
+/* For self messages */
+.message-from-self .message-header {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+}
+
+.message-from-self .message-time {
+}
+
+.msgs .message-from-self .prefix {
+    margin-right: 8px;
+    padding-left: 0px !important;
 }

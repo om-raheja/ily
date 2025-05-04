@@ -22,6 +22,7 @@ var Chat = {
 	is_online: false,
 	is_typing: false,
 	last_sent_nick: null,
+    last_msg_time: null,
 
 	original_title: document.title,
 	new_title: "New messages...",
@@ -255,74 +256,48 @@ var Chat = {
         my_password = sessionStorage.password = localStorage.password = password;
     },
 
-	new_msg: function(r, notif=true){
-		console.log("New message.");
+    new_msg: function(r, notif=true){
+        console.log(r.time);
 
-		const fromSelf = my_nick == r.f;
-
-		var li = document.createElement('div');
-		li.id = r.id;
-
-		var prefix = document.createElement('span');
-		prefix.className = 'prefix';
-		prefix.innerText = r.f;
-		li.appendChild(prefix);
-
-		if(Chat.last_sent_nick === r.f){
-			prefix.style.display = "none";
-			li.prefix = prefix;
-		} else {
-			Chat.last_sent_nick = r.f;
-		}
-
-		var msg = document.createElement('div');
-		msg.className = 'message';
-
-		var body = document.createElement('span');
-		body.className = 'body' + (fromSelf ? ' out' : ' in');
-		Chat.append_msg(body, r.m);
-
-        /*
-        // Add timestamp
-        var time = document.createElement('span');
-        time.className = 'message-time';
-        time.textContent = this.format_time(r.time);
-        msg.appendChild(time); // Add to message container
-        */
-
-		msg.appendChild(body);
-
-		li.appendChild(msg);
-
-		var c = document.createElement('li');
-		c.appendChild(li);
-		if (fromSelf){
-			c.classList.add('message-from-self');
-		}
-
-		// Prepend because flex-direction: column-reverse
-		Chat.msgs_list.prepend(c);
-
-		// Notify user
-        if(notif) Chat.notif.create(r.f, r.m);
-
-		// Scroll to new message
-		Chat.scroll();
-	},
-
-	make_historical_msg_element: function(r, previousNick){
-		// Append because flex-direction: column-reverse
         const fromSelf = my_nick == r.f;
-        const showHeader = previousNick !== r.f;
 
         var li = document.createElement('div');
         li.id = r.id;
 
+        // Create header container
+        var header = document.createElement('div');
+        header.className = 'message-header';
+
+        // Username
         var prefix = document.createElement('span');
         prefix.className = 'prefix';
         prefix.innerText = r.f;
-        prefix.style.display = showHeader ? "block" : "none";
-        li.appendChild(prefix);
+        
+        // Timestamp
+        var time = document.createElement('span');
+        time.className = 'message-time';
+        time.textContent = Chat.format_time(r.time);
+
+        header.appendChild(prefix);
+        header.appendChild(time);
+        li.appendChild(header);
+
+        // Determine if header should show
+        const prevNick = Chat.last_sent_nick;
+        const prevTime = Chat.last_msg_time;
+        const timeDiff = prevTime ? (new Date(r.time) - new Date(prevTime)) : Infinity;
+        const showHeader = prevNick !== r.f || timeDiff > 600000; // 10 minutes
+
+        header.style.display = showHeader ? "flex" : "none";
+        if (showHeader) {
+            Chat.last_sent_nick = r.f;
+            Chat.last_msg_time = r.time;
+        } else {
+            li.header = header; // Store reference for potential updates
+        }
+
+        // Always update last message time
+        Chat.last_msg_time = r.time;
 
         var msg = document.createElement('div');
         msg.className = 'message';
@@ -331,12 +306,61 @@ var Chat = {
         body.className = 'body' + (fromSelf ? ' out' : ' in');
         Chat.append_msg(body, r.m);
 
-        /*
+        msg.appendChild(body);
+        li.appendChild(msg);
+
+        var c = document.createElement('li');
+        c.appendChild(li);
+        if (fromSelf){
+            c.classList.add('message-from-self');
+        }
+
+        // Prepend because flex-direction: column-reverse
+        Chat.msgs_list.prepend(c);
+
+        // Notify user
+        if(notif) Chat.notif.create(r.f, r.m);
+
+        // Scroll to new message
+        Chat.scroll();
+    },
+
+    make_historical_msg_element: function(r, previousData) {
+        const fromSelf = my_nick == r.f;
+        const prevNick = previousData?.nick;
+        const prevTime = previousData?.time;
+        
+        const timeDiff = prevTime ? (new Date(r.time) - new Date(prevTime)) : Infinity;
+        const showHeader = prevNick !== r.f || timeDiff > 600000;
+
+        var li = document.createElement('div');
+        li.id = r.id;
+
+        // Header container
+        var header = document.createElement('div');
+        header.className = 'message-header';
+        header.style.display = showHeader ? "flex" : "none";
+
+        // Username and timestamp
+        var prefix = document.createElement('span');
+        prefix.className = 'prefix';
+        prefix.innerText = r.f;
+
         var time = document.createElement('span');
         time.className = 'message-time';
         time.textContent = Chat.format_time(r.time);
-        msg.appendChild(time); // Add to message container
-        */
+
+        header.appendChild(prefix);
+        header.appendChild(time);
+        li.appendChild(header);
+
+        // Message body
+        var msg = document.createElement('div');
+        msg.className = 'message';
+
+        var body = document.createElement('span');
+        body.className = 'body' + (fromSelf ? ' out' : ' in');
+        Chat.append_msg(body, r.m);
 
         msg.appendChild(body);
         li.appendChild(msg);
@@ -347,14 +371,26 @@ var Chat = {
             c.classList.add('message-from-self');
         }
 
-        return { element: c, currentNick: r.f };
-	},
+        return {
+            element: c,
+            currentData: {
+                nick: r.f,
+                time: r.time
+            }
+        };
+    },
 
-    format_time: function(isoString) {
-        const date = new Date(isoString);
-        return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
+    format_time: function(timestamp) {
+        const date = new Date(timestamp);
+        return `${date.toLocaleDateString(undefined, {
+            month: 'numeric',
+            day: 'numeric',
+            year: 'numeric',
+            hour12: false
+        })} ${date.toLocaleTimeString(undefined, {
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
+            hour12: true
         })}`;
     },
 
@@ -565,14 +601,14 @@ var Chat = {
             const prevScrollTop = Chat.chat_box.scrollTop;
 
             // Track previous nick within this batch
-            let previousNick = null;
+            let previousData = null;
             const fragment = document.createDocumentFragment();
             
             // Process messages in reverse order (oldest first)
             data.msgs.reverse().forEach(msg => {
-                const { element, currentNick } = Chat.make_historical_msg_element(msg, previousNick);
+                const { element, currentData } = Chat.make_historical_msg_element(msg, previousData);
                 fragment.prepend(element);
-                previousNick = currentNick;
+                previousData = currentData;
             });
 
             // Insert at top
