@@ -3,58 +3,93 @@ const express = require('express')
 const app = express()
 const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
+const fs = require('fs'); // Added for Unix socket handling
 
 const path = require('path')
 const html = path.join(__dirname, '/html');
 app.use(express.static(html))
 
-const port = process.argv[2] || 8090;
-const http = require("http").Server(app);
+// Parse command-line arguments
+const args = process.argv.slice(2);
+let port = 8090;
+let unixSocketPath = null;
+
+for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--unix' && i + 1 < args.length) {
+        unixSocketPath = args[i + 1];
+        i++; // Skip next argument (the socket path)
+    } else {
+        port = args[i] || port;
+    }
+}
 
 const maxHttpBufferSizeInMb = parseInt(process.env.MAX_HTTP_BUFFER_SIZE_MB || '1');
+const http = require("http").Server(app);
 const io = require("socket.io")(http, {
-  maxHttpBufferSize: maxHttpBufferSizeInMb * 1024 * 1024,
+    maxHttpBufferSize: maxHttpBufferSizeInMb * 1024 * 1024,
 });
 
 let pool = null;
 if (process.env.DB_STRING) {
-    pool = new Pool({connectionString: process.env.DB_STRING});
+    pool = new Pool({ connectionString: process.env.DB_STRING });
 } else {
     pool = new Pool({
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      ssl: process.env.DB_SSL === 'require' ? { rejectUnauthorized: false } : false
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT,
+        user: process.env.DB_USER,
+        password: process.env.DB_PASSWORD,
+        database: process.env.DB_NAME,
+        ssl: process.env.DB_SSL === 'require' ? { rejectUnauthorized: false } : false
     });
 }
 
 pool.query('SELECT NOW()')
-  .then(() => console.log('Database connected successfully'))
-  .catch(err => console.error('Database connection error:', err));
+    .then(() => console.log('Database connected successfully'))
+    .catch(err => console.error('Database connection error:', err));
 
 pool.query(`CREATE TABLE IF NOT EXISTS users (
-  id SERIAL PRIMARY KEY,
-  username VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  created decimal default extract(epoch from now()),
-  view_history BOOLEAN DEFAULT TRUE NOT NULL
-    );`);
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created decimal default extract(epoch from now()),
+    view_history BOOLEAN DEFAULT TRUE NOT NULL
+);`);
 
 pool.query(`CREATE TABLE IF NOT EXISTS messages (
-  id SERIAL PRIMARY KEY,
-  username VARCHAR(255) NOT NULL,
-  message TEXT NOT NULL,
-  sent_at DECIMAL DEFAULT EXTRACT(EPOCH FROM NOW())
-    );`);
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    sent_at DECIMAL DEFAULT EXTRACT(EPOCH FROM NOW())
+);`);
 
 // batch size when requesting old questions
 let batch_size = process.env.BATCH_SIZE ?? 50;
 
-http.listen(port, function(){
-	console.log("Starting server on port %s", port);
-});
+// Start server on either Unix socket or TCP port
+if (unixSocketPath) {
+    // Remove existing socket if present
+    try {
+        if (fs.existsSync(unixSocketPath)) {
+            fs.unlinkSync(unixSocketPath);
+        }
+    } catch (err) {
+        console.error('Error removing existing socket:', err);
+    }
+
+    http.listen(unixSocketPath, function () {
+        console.log("Starting server on Unix socket %s", unixSocketPath);
+        // Set permissions (optional)
+        try {
+            fs.chmodSync(unixSocketPath, 0o777);
+        } catch (err) {
+            console.error('Warning: Could not set socket permissions:', err);
+        }
+    });
+} else {
+    http.listen(port, function () {
+        console.log("Starting server on port %s", port);
+    });
+}
 
 const users = new Set();
 io.sockets.on("connection", function(socket){
