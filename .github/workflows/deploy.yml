@@ -28,7 +28,6 @@ jobs:
 
           echo "Restarting the service"
           # Get UID and set required environment variables
-          export UID=$(id -u)
           export XDG_RUNTIME_DIR=/run/user/$UID
           export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus
           systemctl --user restart ${{ secrets.SERVICE_NAME }}
