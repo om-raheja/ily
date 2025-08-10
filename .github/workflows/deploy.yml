@@ -1,0 +1,32 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        script: |
+          echo "Updating..."
+          cd ${{ secrets.APP_DIR }}
+          git pull origin master
+
+          npm i
+
+          echo "Restarting the service"
+          systemctl --user restart ${{ secrets.SERVICE_NAME }}
+          echo "Done!"
+    
