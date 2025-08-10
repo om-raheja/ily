@@ -4,7 +4,7 @@ Om: I love you, my unnamed gf (the internet will never know u) <3
 
 Simple plug & play real-time JavaScript chat implemented using Socket.io.
 
-TODO: e2e
+TODO: e2e chat
 
 Where simplicity meets usability:
 
